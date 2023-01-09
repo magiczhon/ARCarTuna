@@ -1,4 +1,5 @@
-import os
+import torch
 
 if __name__ == '__main__':
-    print('start')
+    x = torch.rand(5, 3)
+    print(x)
