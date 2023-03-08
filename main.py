@@ -78,8 +78,7 @@ def fit(epochs, model, train_loader, val_loader, criterion, optimizer, scheduler
             mask = mask_tiles.to(device)
             # forward
             output = model(image)
-            # print(f'output size {output.size()}')
-            # print(f'mask size {mask.size()}')
+            # print(f'output size {output.size()} mask size {mask.size()}')
             loss = criterion(output, mask)
             # evaluation metrics
             iou_score += mIoU(output, mask)
@@ -176,19 +175,22 @@ def main():
 
     # размер входных изображений должен быть кратен размеру первой свертки
     trf_img = transforms.Compose([
-        Padding(32),
         transforms.ColorJitter(0.7, 0.7, 0.7, 0),
         ToFloatTensor(),
-        transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
+        # transforms.Normalize(mean=0.5, std=0.5)
+        transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
+        Padding(32),
     ])
 
     trf_mask = transforms.Compose([
-        Padding(32),
         ToFloatTensor(),
+        Padding(32),
     ])
 
     data_train = CarBodyDataset(imgs_train, mask_train, trf_img, trf_mask)
     data_test = CarBodyDataset(imgs_test, mask_test, trf_img, trf_mask)
+
+    show(data_train[149]['img'])
 
     train_loader = DataLoader(data_train, batch_size=1, shuffle=False)
     test_loader = DataLoader(data_test, batch_size=1, shuffle=False)
