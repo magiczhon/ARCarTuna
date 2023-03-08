@@ -3,6 +3,7 @@ from pathlib import Path
 
 import matplotlib.pyplot as plt
 import segmentation_models_pytorch as smp
+import torch
 import torchvision.transforms as transforms
 import torchvision.transforms.functional as F
 from torch.utils.data import DataLoader
@@ -15,9 +16,10 @@ DATA_ROOT = Path('./Data/')
 IMAGES = DATA_ROOT / Path('images')
 MASKS = DATA_ROOT / Path('masks')
 LABELS = ['background', 'car', 'wheel', 'lights', 'window']
+SAVE_MODELS_PATH = Path('models')
 
-# device = 'mps'
-device = 'cpu'
+device = 'mps'
+# device = 'cpu'
 # device = 'gpu'
 
 
@@ -207,6 +209,10 @@ def main():
                                                 steps_per_epoch=len(train_loader))
 
     history = fit(epoch, model, train_loader, test_loader, criterion, optimizer, sched)
+
+    SAVE_MODELS_PATH.mkdir(exist_ok=True)
+    torch.save(model.state_dict(), f'./{SAVE_MODELS_PATH}/unet_state_dict_{history["val_loss"]}_{history["val_miou"]}_{history["val_acc"]}')
+    torch.save(model, f'./{SAVE_MODELS_PATH}/unet{history["val_loss"]}_{history["val_miou"]}_{history["val_acc"]}')
 
 
 if __name__ == '__main__':
