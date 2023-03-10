@@ -12,7 +12,7 @@ from tqdm import tqdm
 from DataLoader import *
 from Metrics import *
 
-DATA_ROOT = Path('./Data/')
+DATA_ROOT = Path('./Data')
 IMAGES = DATA_ROOT / Path('images')
 MASKS = DATA_ROOT / Path('masks')
 LABELS = ['background', 'car', 'wheel', 'lights', 'window']
@@ -21,6 +21,7 @@ SAVE_MODELS_PATH = Path('models')
 device = 'mps'
 # device = 'cpu'
 # device = 'gpu'
+device = torch.device(device)
 
 
 def get_lr(optimizer):
@@ -43,7 +44,11 @@ def show(imgs):
         axs[0, i].set(xticklabels=[], yticklabels=[], xticks=[], yticks=[])
 
 
-def fit(epochs, model, train_loader, val_loader, criterion, optimizer, scheduler, patch=False):
+def save_model(model, fn):
+    SAVE_MODELS_PATH.mkdir(exist_ok=True)
+    torch.save(model, f'./{SAVE_MODELS_PATH}/{fn}')
+
+def fit(epochs, model, train_loader, val_loader, criterion, optimizer, scheduler):
     train_losses = []
     test_losses = []
     val_iou = []
@@ -63,23 +68,19 @@ def fit(epochs, model, train_loader, val_loader, criterion, optimizer, scheduler
         iou_score = 0
         accuracy = 0
         # training loop
+
         model.train()
         for i, data in enumerate(tqdm(train_loader)):
             # training phase
             image_tiles, mask_tiles = data['img'], data['mask']
             # print(image_tiles.size(), mask_tiles.size())
-            if patch:
-                bs, n_tiles, c, h, w = image_tiles.size()
-
-                image_tiles = image_tiles.view(-1, c, h, w)
-                mask_tiles = mask_tiles.view(-1, h, w)
 
             image = image_tiles.to(device)
             mask = mask_tiles.to(device)
             # forward
             output = model(image)
             # print(f'output size {output.size()} mask size {mask.size()}')
-            loss = criterion(output, mask)
+            loss = criterion(output[0], mask[0])
             # evaluation metrics
             iou_score += mIoU(output, mask)
             accuracy += pixel_accuracy(output, mask)
@@ -99,17 +100,12 @@ def fit(epochs, model, train_loader, val_loader, criterion, optimizer, scheduler
             test_loss = 0
             test_accuracy = 0
             val_iou_score = 0
+
             # validation loop
             with torch.no_grad():
                 for i, data in enumerate(tqdm(val_loader)):
                     # reshape to 9 patches from single image, delete batch size
                     image_tiles, mask_tiles = data['img'], data['mask']
-
-                    if patch:
-                        bs, n_tiles, c, h, w = image_tiles.size()
-
-                        image_tiles = image_tiles.view(-1, c, h, w)
-                        mask_tiles = mask_tiles.view(-1, h, w)
 
                     image = image_tiles.to(device)
                     mask = mask_tiles.to(device)
@@ -118,20 +114,25 @@ def fit(epochs, model, train_loader, val_loader, criterion, optimizer, scheduler
                     val_iou_score += mIoU(output, mask)
                     test_accuracy += pixel_accuracy(output, mask)
                     # loss
-                    loss = criterion(output, mask)
+                    loss = criterion(output[0], mask[0])
                     test_loss += loss.item()
 
             # calculatio mean for each batch
             train_losses.append(running_loss / len(train_loader))
             test_losses.append(test_loss / len(val_loader))
 
+            print(f'loss train: {running_loss}')
+            print(f'loss train: {test_loss}')
+
             if min_loss > (test_loss / len(val_loader)):
                 print('Loss Decreasing.. {:.3f} >> {:.3f} '.format(min_loss, (test_loss / len(val_loader))))
                 min_loss = (test_loss / len(val_loader))
-                decrease += 1
-                if decrease % 5 == 0:
-                    print('saving model...')
-                    torch.save(model, 'Unet-Mobilenet_v2_mIoU-{:.3f}.pt'.format(val_iou_score / len(val_loader)))
+
+                print('saving model...')
+                save_model(model, 'Unet-Mobilenet_v2_mIoU-{:.3f}_loss-{:.3f}.pt'.
+                           format(val_iou_score / len(val_loader),
+                                  min_loss
+                                  ))
 
             if (test_loss / len(val_loader)) > min_loss:
                 not_improve += 1
@@ -190,10 +191,8 @@ def main():
     data_train = CarBodyDataset(imgs_train, mask_train, trf_img, trf_mask)
     data_test = CarBodyDataset(imgs_test, mask_test, trf_img, trf_mask)
 
-    show(data_train[149]['img'])
-
     train_loader = DataLoader(data_train, batch_size=1, shuffle=False)
-    test_loader = DataLoader(data_test, batch_size=1, shuffle=False)
+    test_loader = DataLoader(data_test, batch_size=1, shuffle=True)
 
     model = smp.Unet('mobilenet_v2',
                      encoder_weights='imagenet',
@@ -201,8 +200,8 @@ def main():
                      activation=None,
                      encoder_depth=3,
                      decoder_channels=[64, 32, 16],
-                     #                  encoder_depth=5,
-                     #                  decoder_channels=[256, 128, 64, 32, 16]
+                     # encoder_depth=5,
+                     # decoder_channels=[256, 128, 64, 32, 16]
                      )
 
     criterion = nn.CrossEntropyLoss()
@@ -211,10 +210,6 @@ def main():
                                                 steps_per_epoch=len(train_loader))
 
     history = fit(epoch, model, train_loader, test_loader, criterion, optimizer, sched)
-
-    SAVE_MODELS_PATH.mkdir(exist_ok=True)
-    torch.save(model.state_dict(), f'./{SAVE_MODELS_PATH}/unet_state_dict_{history["val_loss"]}_{history["val_miou"]}_{history["val_acc"]}')
-    torch.save(model, f'./{SAVE_MODELS_PATH}/unet{history["val_loss"]}_{history["val_miou"]}_{history["val_acc"]}')
 
 
 if __name__ == '__main__':

@@ -31,7 +31,7 @@ class CarBodyDataset(Dataset):
             chanels, height, width = read_image(str(path)).shape
             img_with_size.append((i, path, height, width))
 
-        img_with_size.sort(key=cmp_to_key(cmp_by_image_resolution))
+        img_with_size.sort(key=cmp_to_key(cmp_by_image_resolution), reverse=True)
         new_sort_idx = [x[0] for x in img_with_size]
 
         self.len_dataset = len(img_paths)
