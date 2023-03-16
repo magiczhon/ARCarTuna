@@ -18,10 +18,10 @@ MASKS = DATA_ROOT / Path('masks')
 LABELS = ['background', 'car', 'wheel', 'lights', 'window']
 SAVE_MODELS_PATH = Path('models')
 
-device = 'mps'
-# device = 'cpu'
-# device = 'gpu'
-device = torch.device(device)
+device = torch.device('mps')
+# device = torch.device('cpu')
+# device = torch.device('gpu')
+
 
 
 def get_lr(optimizer):
@@ -47,6 +47,7 @@ def show(imgs):
 def save_model(model, fn):
     SAVE_MODELS_PATH.mkdir(exist_ok=True)
     torch.save(model, f'./{SAVE_MODELS_PATH}/{fn}')
+
 
 def fit(epochs, model, train_loader, val_loader, criterion, optimizer, scheduler):
     train_losses = []
@@ -166,16 +167,17 @@ def fit(epochs, model, train_loader, val_loader, criterion, optimizer, scheduler
 
 def main():
     max_lr = 1e-3
-    epoch = 15
+    epoch = 50
     weight_decay = 1e-4
 
     img_list = list(IMAGES.glob('*'))
     mask_list = list(MASKS.glob('*'))
 
-    imgs_train, imgs_test, mask_train, mask_test = train_test_split(img_list, mask_list, 0.8)
+    imgs_train, imgs_test, mask_train, mask_test = train_test_split(img_list, mask_list, 0.8, permute=True)
 
     # размер входных изображений должен быть кратен размеру первой свертки
     trf_img = transforms.Compose([
+        ResizeTo(1080),
         transforms.ColorJitter(0.7, 0.7, 0.7, 0),
         ToFloatTensor(),
         # transforms.Normalize(mean=0.5, std=0.5)
@@ -184,6 +186,7 @@ def main():
     ])
 
     trf_mask = transforms.Compose([
+        ResizeTo(1080),
         ToFloatTensor(),
         Padding(32),
     ])
@@ -198,10 +201,10 @@ def main():
                      encoder_weights='imagenet',
                      classes=1,
                      activation=None,
-                     encoder_depth=3,
-                     decoder_channels=[64, 32, 16],
-                     # encoder_depth=5,
-                     # decoder_channels=[256, 128, 64, 32, 16]
+                     # encoder_depth=3,
+                     # decoder_channels=[64, 32, 16],
+                     encoder_depth=5,
+                     decoder_channels=[256, 128, 64, 32, 16]
                      )
 
     criterion = nn.CrossEntropyLoss()

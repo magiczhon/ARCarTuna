@@ -5,7 +5,7 @@ import torch
 import torch.nn as nn
 from torch.utils.data import Dataset
 from torchvision.io import read_image
-
+import torchvision.transforms.functional as F
 
 # сортируем изображения по разрешению (чтобы в битче были изображения похожего разрешения)
 def cmp_by_image_resolution(x, y):
@@ -31,7 +31,7 @@ class CarBodyDataset(Dataset):
             chanels, height, width = read_image(str(path)).shape
             img_with_size.append((i, path, height, width))
 
-        img_with_size.sort(key=cmp_to_key(cmp_by_image_resolution), reverse=True)
+        img_with_size.sort(key=cmp_to_key(cmp_by_image_resolution), reverse=False)
         new_sort_idx = [x[0] for x in img_with_size]
 
         self.len_dataset = len(img_paths)
@@ -111,9 +111,16 @@ class Padding(object):
         return resize_image
 
 
-def remove_borders_inplace(mask):
-    mask[mask == 255] = 0
-    return mask
+class ResizeTo(object):
+    def __init__(self, resize_to):
+        self._resize_to = resize_to
+
+    def __call__(self, image):
+        min_pixels_size = min(image.size()[1:])
+        if min_pixels_size > self._resize_to:
+            resize_image = F.resize(image, self._resize_to)
+            return resize_image
+        return image
 
 
 class ToFloatTensor(object):
