@@ -1,3 +1,4 @@
+import datetime
 import time
 from pathlib import Path
 
@@ -8,6 +9,7 @@ import torchvision.transforms as transforms
 import torchvision.transforms.functional as F
 from torch.utils.data import DataLoader
 from tqdm import tqdm
+import albumentations as A
 
 from DataLoader import *
 from Metrics import *
@@ -19,10 +21,10 @@ LABELS = ['background', 'car', 'wheel', 'lights', 'window']
 SAVE_MODELS_PATH = Path('models')
 
 device = torch.device('mps')
+
+
 # device = torch.device('cpu')
 # device = torch.device('gpu')
-
-
 
 def get_lr(optimizer):
     for param_group in optimizer.param_groups:
@@ -71,16 +73,18 @@ def fit(epochs, model, train_loader, val_loader, criterion, optimizer, scheduler
         # training loop
 
         model.train()
-        for i, data in enumerate(tqdm(train_loader)):
+        for i, data in tqdm(enumerate(train_loader)):
             # training phase
             image_tiles, mask_tiles = data['img'], data['mask']
-            # print(image_tiles.size(), mask_tiles.size())
 
+            image_tiles = image_tiles.permute(0, 3, 1, 2)
             image = image_tiles.to(device)
+
+            mask_tiles = mask_tiles.unsqueeze(1)
             mask = mask_tiles.to(device)
+
             # forward
             output = model(image)
-            # print(f'output size {output.size()} mask size {mask.size()}')
             loss = criterion(output[0], mask[0])
             # evaluation metrics
             iou_score += mIoU(output, mask)
@@ -108,7 +112,10 @@ def fit(epochs, model, train_loader, val_loader, criterion, optimizer, scheduler
                     # reshape to 9 patches from single image, delete batch size
                     image_tiles, mask_tiles = data['img'], data['mask']
 
+                    image_tiles = image_tiles.permute(0, 3, 1, 2)
                     image = image_tiles.to(device)
+
+                    mask_tiles = mask_tiles.unsqueeze(1)
                     mask = mask_tiles.to(device)
                     output = model(image)
                     # evaluation metrics
@@ -130,10 +137,10 @@ def fit(epochs, model, train_loader, val_loader, criterion, optimizer, scheduler
                 min_loss = (test_loss / len(val_loader))
 
                 print('saving model...')
-                save_model(model, 'Unet-Mobilenet_v2_mIoU-{:.3f}_loss-{:.3f}.pt'.
-                           format(val_iou_score / len(val_loader),
-                                  min_loss
-                                  ))
+                save_model(model, f'Unet-Mobilenet_v2_'
+                                  f'{datetime.datetime.today():%d-%m-%y}'
+                                  f'_mIoU-{val_iou_score / len(val_loader):.3f}'
+                                  f'_loss-{min_loss:.3f}.pt')
 
             if (test_loss / len(val_loader)) > min_loss:
                 not_improve += 1
@@ -169,6 +176,7 @@ def main():
     max_lr = 1e-3
     epoch = 50
     weight_decay = 1e-4
+    batch_size = 5
 
     img_list = list(IMAGES.glob('*'))
     mask_list = list(MASKS.glob('*'))
@@ -176,25 +184,18 @@ def main():
     imgs_train, imgs_test, mask_train, mask_test = train_test_split(img_list, mask_list, 0.8, permute=True)
 
     # размер входных изображений должен быть кратен размеру первой свертки
-    trf_img = transforms.Compose([
-        ResizeTo(1080),
-        transforms.ColorJitter(0.7, 0.7, 0.7, 0),
-        ToFloatTensor(),
-        # transforms.Normalize(mean=0.5, std=0.5)
-        transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
-        Padding(32),
+    aug = A.Compose([
+        A.PadIfNeeded(1920),
+        # A.RandomCrop(1920, 1080),
+        A.RandomCrop(1024, 1024),
+        A.ColorJitter(0.7, 0.7, 0.7, 0),
+        A.Normalize(),
     ])
 
-    trf_mask = transforms.Compose([
-        ResizeTo(1080),
-        ToFloatTensor(),
-        Padding(32),
-    ])
+    data_train = CarBodyDataset(imgs_train, mask_train, aug)
+    data_test = CarBodyDataset(imgs_test, mask_test, aug)
 
-    data_train = CarBodyDataset(imgs_train, mask_train, trf_img, trf_mask)
-    data_test = CarBodyDataset(imgs_test, mask_test, trf_img, trf_mask)
-
-    train_loader = DataLoader(data_train, batch_size=1, shuffle=False)
+    train_loader = DataLoader(data_train, batch_size=batch_size, shuffle=False)
     test_loader = DataLoader(data_test, batch_size=1, shuffle=True)
 
     model = smp.Unet('mobilenet_v2',
