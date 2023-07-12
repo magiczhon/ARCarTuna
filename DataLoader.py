@@ -1,10 +1,14 @@
+# coding: utf-8
 from functools import cmp_to_key
 
+import cv2
 import numpy as np
 import torch
 import torch.nn as nn
+import torchvision.transforms.functional as F
 from torch.utils.data import Dataset
 from torchvision.io import read_image
+import albumentations as A
 
 
 # сортируем изображения по разрешению (чтобы в битче были изображения похожего разрешения)
@@ -21,7 +25,7 @@ def cmp_by_image_resolution(x, y):
 
 
 class CarBodyDataset(Dataset):
-    def __init__(self, img_paths, mask_paths, transform_img=None, transform_mask=None):
+    def __init__(self, img_paths, mask_paths, transform: A = None):
         assert len(img_paths) == len(mask_paths), \
             f'Кол-во картинок и масок к ним не совпадает {(len(img_paths), len(mask_paths))}'
 
@@ -31,34 +35,31 @@ class CarBodyDataset(Dataset):
             chanels, height, width = read_image(str(path)).shape
             img_with_size.append((i, path, height, width))
 
-        img_with_size.sort(key=cmp_to_key(cmp_by_image_resolution), reverse=True)
+        img_with_size.sort(key=cmp_to_key(cmp_by_image_resolution), reverse=False)
         new_sort_idx = [x[0] for x in img_with_size]
 
         self.len_dataset = len(img_paths)
         self.img_paths = np.array(img_paths)[new_sort_idx]
         self.mask_paths = np.array(mask_paths)[new_sort_idx]
-        self._transform_img = transform_img
-        self._transform_mask = transform_mask
+        self._transform = transform
 
     def __len__(self):
         return self.len_dataset
 
     def __getitem__(self, idx):
-        img = read_image(str(self.img_paths[idx]))
-        # бывает, что у изображения 4 канала
-        if img.size()[0] == 4:
-            img = img[:3, :, :]
+        img = cv2.imread(str(self.img_paths[idx]))
 
-        mask = read_image(str(self.mask_paths[idx]))
+        mask = cv2.imread(str(self.mask_paths[idx]), cv2.IMREAD_GRAYSCALE)
         # 1 - это маска кузова авто
         mask_body = mask == 1
 
-        if self._transform_img:
-            img = self._transform_img(img)
+        if self._transform:
+            augmented = self._transform(image=np.array(img, dtype=np.uint8), mask=np.array(mask_body, dtype=np.uint8))
+            img = augmented['image']
+            img = torch.FloatTensor(img)
 
-        if self._transform_mask:
-            mask_body = self._transform_mask(mask_body)
-
+            mask_body = augmented['mask']
+            mask_body = torch.FloatTensor(mask_body)
         sample = {'img': img, 'mask': mask_body}
         return sample
 
@@ -86,38 +87,6 @@ def train_test_split(img_list: list, mask_list: list, size: float, permute=False
            permute_mask_list[:train_size], permute_mask_list[train_size:]
 
 
-class Padding(object):
-    def __init__(self, first_conv_layer_size):
-        self._conv_size = first_conv_layer_size
-
-    def __call__(self, image):
-        chanels, height, width = image.shape
-
-        pad_vertical = (self._conv_size - height % self._conv_size)
-        pad_horizontal = (self._conv_size - width % self._conv_size)
-
-        pad_top = pad_bot = int(pad_vertical / 2)
-        if pad_vertical % 2:
-            pad_top += 1
-
-        pad_left = pad_right = int(pad_horizontal / 2)
-        if pad_horizontal % 2:
-            pad_left += 1
-
-        pad = nn.ZeroPad2d(map(int, (pad_left, pad_right, pad_top, pad_bot)))
-        resize_image = pad(torch.Tensor(image))
-        assert resize_image.size()[1] % 32 == 0
-        assert resize_image.size()[2] % 32 == 0
-        return resize_image
-
-
-def remove_borders_inplace(mask):
-    mask[mask == 255] = 0
-    return mask
-
-
 class ToFloatTensor(object):
     def __call__(self, img):
         return img.type('torch.FloatTensor')
-
-
